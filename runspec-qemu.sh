@@ -114,10 +114,12 @@ Usage: runspec-qemu.sh [--tooldir <dir>]
                        [--no-vector]
                        [--spec-flags <str>]
                        [--qemu64-flags <str>]
+                       [--vlen <str>]
                        [--keeptmp]
                        [--clean]
                        [--build-only]
-		       [--static]
+                       [--build]
+                       [--static]
                        [--help|-h]
 
 The benchmark list may include the shorthands quick, intrate, fprate,
@@ -173,7 +175,9 @@ spec_quick="602.gcc_s 623.xalancbmk_s 998.specrand_is"
 spec_intrate="500.perlbench_r 502.gcc_r 505.mcf_r 520.omnetpp_r 523.xalancbmk_r 525.x264_r 531.deepsjeng_r 541.leela_r 548.exchange2_r 557.xz_r 999.specrand_ir"
 spec_fprate="503.bwaves_r 507.cactuBSSN_r 508.namd_r 510.parest_r 511.povray_r 519.lbm_r 521.wrf_r 526.blender_r 527.cam4_r 538.imagick_r 544.nab_r 549.fotonik3d_r 554.roms_r 997.specrand_fr"
 spec_intspeed="600.perlbench_s 602.gcc_s 605.mcf_s 620.omnetpp_s 623.xalancbmk_s 625.x264_s 631.deepsjeng_s 641.leela_s 648.exchange2_s 657.xz_s 998.specrand_is"
-spec_fpspeed="603.bwaves_s 607.cactuBSSN_s 619.lbm_s 621.wrf_s 627.cam4_s 628.pop2_s 638.imagick_s 644.nab_s 649.fotonik3d_s 654.roms_s 996.specrand_fs"
+#spec_fpspeed="603.bwaves_s 607.cactuBSSN_s 619.lbm_s 621.wrf_s 627.cam4_s 628.pop2_s 638.imagick_s 644.nab_s 649.fotonik3d_s 654.roms_s 996.specrand_fs"
+spec_fpspeed="603.bwaves_s 607.cactuBSSN_s 619.lbm_s 621.wrf_s 628.pop2_s 638.imagick_s 644.nab_s 996.specrand_fs"
+
 spec_rate="${spec_intrate} ${spec_fprate}"
 spec_speed="${spec_intspeed} ${spec_fpspeed}"
 spec_all="${spec_rate} ${spec_speed}"
@@ -183,7 +187,7 @@ benchmarks="${spec_intspeed}"
 config="linux-riscv64-qemu"
 size="ref"
 tune="base"
-arch="rv64gc"
+arch="rv64gcv"
 abi="lp64d"
 spec_flags="-Ofast"
 lto_flags=""
@@ -195,8 +199,10 @@ fc_compiler="gfortran"
 
 # May need to change this for other supported extensions
 qemu64_flags="zicsr=true,v=true,vext_spec=v1.0,zfh=true,zvfh=true"
+vlen="128"
 keeptmp=""
 doclean="no"
+dobuild="no"
 dorun="yes"
 logfile="spec-qemu-${rundate}"
 
@@ -206,6 +212,10 @@ until
     opt="$1"
     case "${opt}"
     in
+    --vlen)
+        shift
+        vlen="$1"
+        ;;
 	--specsrcdir)
 	    shift
 	    specsrcdir="$1"
@@ -342,7 +352,11 @@ until
 	    ;;
 	--build-only)
             dorun="no"
+            dobuild="yes"
 	    ;;
+    --build)
+            dobuild="yes"
+        ;;
 	--static)
 	    static_flags="-static -Wl,-Ttext-segment,0x10000"
 	    ;;
@@ -454,6 +468,7 @@ echo "arch          ${arch}"         >> ${logfile}
 echo "abi           ${abi}"          >> ${logfile}
 echo "spec_flags:   ${spec_flags}"   >> ${logfile}
 echo "qemu64_flags: ${qemu64_flags}" >> ${logfile}
+echo "vlen:         ${vlen}"         >> ${logfile}
 echo "static_flags: ${static_flags}" >> ${logfile}
 echo "cc_compiler:  ${cc_compiler}"  >> ${logfile}
 echo "cxx_compiler: ${cxx_compiler}" >> ${logfile}
@@ -461,6 +476,7 @@ echo "fc_compiler:  ${fc_compiler}"  >> ${logfile}
 echo "keeptmp:      ${keeptmp}"      >> ${logfile}
 echo "doclean:      ${doclean}"      >> ${logfile}
 echo "dorun:        ${dorun}"        >> ${logfile}
+echo "dobuild:      ${dobuild}"      >> ${logfile}
 
 # Install SPEC CPU 2017 if desired
 if [[ -d ${specdir} ]]
@@ -471,11 +487,11 @@ else
     cd ${specsrcdir}
     if ./install.sh -f -d ${specdir} >> ${logfile} 2>&1
     then
-	mess "SPEC CPU 2017 installed in ${specdir}"
+        mess "SPEC CPU 2017 installed in ${specdir}"
     else
-	mess "ERROR: failed to install SPEC CPU 2017"
-	mess "See ${logfile}"
-	exit 1
+        mess "ERROR: failed to install SPEC CPU 2017"
+        mess "See ${logfile}"
+        exit 1
     fi
 fi
 
@@ -504,66 +520,62 @@ then
     hdr "Cleaning" "..."
 
     runcpu --config ${config} --define gcc_dir=${installdir} \
-	   --define qemu_plugin_dir=${qemuplugindir} \
-	   --define build_ncpus=$(nproc) \
-	   --define model="-march=${arch} -mabi=${abi}" \
-	   --define spec_flags="${spec_flags}" \
-	   --define qemu64_flags="${qemu64_flags}" \
-	   --define static_flags="${static_flags}" \
-	   --define cc_compiler="${cc_compiler}" \
-	   --define cxx_compiler="${cxx_compiler}" \
-	   --define fc_compiler="${fc_compiler}" \
-	   --action scrub ${benchmarks} \
-	   >> ${tmpdir}/cleaning-log 2>&1
+       --define cc_compiler="${cc_compiler}" \
+       --define cxx_compiler="${cxx_compiler}" \
+       --define fc_compiler="${fc_compiler}" \
+       --action scrub ${benchmarks} \
+       >> ${tmpdir}/cleaning-log 2>&1
     cat ${tmpdir}/cleaning-log >> ${logfile}
     cleanlog="$(sed -n -e 's/^The log for this run is in \(.*\)$/\1/p' \
                     ${tmpdir}/cleaning-log)"
     rm -f ${tmpdir}/cleaning-log
 fi
 
+goodbuilds=""
+badbuilds=""
+
 # Build all the benchmarks and set up execution
-hdr "Building" "..."
-buildlog=
-bd="${tmpdir}/building-log"
-runcpu --config ${config} --define gcc_dir=${installdir} \
-       --define qemu_plugin_dir=${qemuplugindir} \
-       --define build_ncpus=$(nproc) --define use_submit \
-       --define model="-march=${arch} -mabi=${abi}" \
-       --define spec_flags="${spec_flags}" \
-       --define qemu64_flags="${qemu64_flags}" \
-       --define static_flags="${static_flags}" \
-       --define cc_compiler="${cc_compiler}" \
-       --define cxx_compiler="${cxx_compiler}" \
-       --define fc_compiler="${fc_compiler}" \
-       --tune=${tune} --size=${size} ${keeptmp} \
-       --loose --action setup \
-       ${benchmarks} >> ${bd} 2>&1
-cat ${bd} >> ${logfile}
-buildlog="$(sed -n -e 's/^The log for this run is in \(.*\)$/\1/p' ${bd})"
-goodbuilds="$(sed -n -e 's/^Build successes for.*: //p' < ${bd} | \
-		    sed -e 's/([^)]\+),\?//g' | sed -e 's/ *None *//')"
-badbuilds="$(sed -n -e 's/^Build errors for.*: //p' < ${bd} | \
-		    sed -e 's/([^)]\+),\?//g' | sed -e 's/ *None *//')"
-
-numgoodbuilds=0
-numbadbuilds=0
-
-if [[ "x${goodbuilds}" != "x" ]]
+if [[ "${dobuild}" == "yes" ]]
 then
-    for b in ${goodbuilds}
-    do
-	numgoodbuilds=$(( numgoodbuilds + 1 ))
-    done
-fi
-if [[ "x${badbuilds}" != "x" ]]
-then
-    for b in ${badbuilds}
-    do
-	numbadbuilds=$(( numbadbuilds + 1 ))
-    done
-fi
+    hdr "Building" "..."
+    buildlog=
+    bd="${tmpdir}/building-log"
+    runcpu --config ${config} --define gcc_dir=${installdir} \
+           --define build_ncpus=$(nproc) --define use_submit \
+           --define cc_compiler="${cc_compiler}" \
+           --define cxx_compiler="${cxx_compiler}" \
+           --define fc_compiler="${fc_compiler}" \
+           --tune=${tune} --size=${size} ${keeptmp} \
+           --loose --action setup \
+           ${benchmarks} >> ${bd} 2>&1
+    cat ${bd} >> ${logfile}
+    buildlog="$(sed -n -e 's/^The log for this run is in \(.*\)$/\1/p' ${bd})"
+    goodbuilds="$(sed -n -e 's/^Build successes for.*: //p' < ${bd} | \
+                  sed -e 's/([^)]\+),\?//g' | sed -e 's/ *None *//')"
+    badbuilds="$(sed -n -e 's/^Build errors for.*: //p' < ${bd} | \
+                 sed -e 's/([^)]\+),\?//g' | sed -e 's/ *None *//')"
 
-rm -f ${bd}
+    numgoodbuilds=0
+    numbadbuilds=0
+
+    if [[ "x${goodbuilds}" != "x" ]]
+    then
+        for b in ${goodbuilds}
+        do
+            numgoodbuilds=$(( numgoodbuilds + 1 ))
+        done
+    fi
+    if [[ "x${badbuilds}" != "x" ]]
+    then
+        for b in ${badbuilds}
+        do
+            numbadbuilds=$(( numbadbuilds + 1 ))
+        done
+    fi
+    rm -f ${bd}
+else
+    goodbuilds=${benchmarks}
+fi
 
 numbad=0
 numgood=0
@@ -577,24 +589,29 @@ then
     declare -A runlog
     for bm in ${benchmarks}
     do
-	mess "Creating script to run $bm"
-	bmlog="${tmpdir}/$bm.log"
-	runcpu --config ${config} --define gcc_dir=${installdir} \
-	       --define qemu_plugin_dir=${qemuplugindir} \
-	       --define build_ncpus=$(nproc) --define use_submit \
-	       --define model="-march=${arch} -mabi=${abi}" \
-	       --define spec_flags="${spec_flags}" \
-	       --define qemu64_flags="${qemu64_flags}" \
-	       --define static_flags="${static_flags}" \
-	       --define cc_compiler="${cc_compiler}" \
-	       --define cxx_compiler="${cxx_compiler}" \
-	       --define fc_compiler="${fc_compiler}" \
-	       --tune=${tune} --size=${size} ${keeptmp} \
-	       --loose --fake --action run ${bm} > ${bmlog} 2>&1
-	runlog["${bm}"]="$(awk -f ${tooldir}/runspec-breakout.awk \
+    mess "Creating script to run $bm"
+    bmlog="${tmpdir}/$bm.log"
+    runcpu --config ${config} --define gcc_dir=${installdir} \
+           --define build_ncpus=$(nproc) --define use_submit \
+           --define cc_compiler="${cc_compiler}" \
+           --define cxx_compiler="${cxx_compiler}" \
+           --define fc_compiler="${fc_compiler}" \
+           --tune=${tune} --size=${size} ${keeptmp} \
+           --loose --fake --action run ${bm} > ${bmlog} 2>&1
+    runlog["${bm}"]="$(awk -f ${tooldir}/runspec-breakout.awk \
                            ${scriptdir}/${bm} < ${bmlog})"
-	cat ${bmlog} >> ${logfile}
+    cat ${bmlog} >> ${logfile}
     done
+
+    if [[ "${size}" == "ref" ]]
+    then
+        if [[ -f ${scriptdir}/625.x264_s-run-0.sh && -f ${scriptdir}/625.x264_s-run-1.sh && -f ${scriptdir}/625.x264_s-run-2.sh ]]
+        then
+            sed -n '2p' ${scriptdir}/625.x264_s-run-1.sh >> ${scriptdir}/625.x264_s-run-0.sh
+            sed -n '2p' ${scriptdir}/625.x264_s-run-2.sh >> ${scriptdir}/625.x264_s-run-0.sh
+            rm ${scriptdir}/625.x264_s-run-1.sh ${scriptdir}/625.x264_s-run-2.sh
+        fi
+    fi
 
     # Now do all the runs together.
     hdr "Launching run scripts" "..."
@@ -603,22 +620,22 @@ then
     loglist=
     for script in ${scriptdir}/*-run-*.sh
     do
-	chmod ugo+x ${script}
-	bmlog="${tmpdir}/$(basename ${script} | sed -e 's/sh$/log/')"
-	if [[ "x${loglist}" == "x" ]]
-	then
-	    loglist="${bmlog}"
-	else
-	    loglist="${bmlog} ${loglist}"
-	fi
-	(time ${script}) > ${bmlog} 2>&1 & pid=$!
-	if [[ "x${pidlist}" == "x" ]]
-	then
-	    pidlist="${pid}"
-	else
-	    pidlist="${pid},${pidlist}"
-	fi
-	numprocs=$(( numprocs + 1 ))
+    chmod ugo+x ${script}
+    bmlog="${tmpdir}/$(basename ${script} | sed -e 's/sh$/log/')"
+    if [[ "x${loglist}" == "x" ]]
+    then
+        loglist="${bmlog}"
+    else
+        loglist="${bmlog} ${loglist}"
+    fi
+    (time ${script}) > ${bmlog} 2>&1 & pid=$!
+    if [[ "x${pidlist}" == "x" ]]
+    then
+        pidlist="${pid}"
+    else
+        pidlist="${pid},${pidlist}"
+    fi
+    numprocs=$(( numprocs + 1 ))
     done
 
     tmess "Launched ${numprocs} run scripts"
@@ -627,28 +644,28 @@ then
     tcheck=0
     while [[ ${numprocs} -ne 0 ]]
     do
-	sleep 10
-	numprocs=$(ps --no-headers -q ${pidlist} | wc -l)
-	if [[ ${numprocs} -eq 0 ]]
-	then
-	    tmess "All run scripts completed"
-	else
-	    # Show we are alive every 30 x 10 = 300s
-	    tcheck=$(( tcheck + 1 ))
-	    if [[ ${tcheck} -eq 30 ]]
-	    then
-		tmess "${numprocs} run scripts still running" "..."
-		tcheck=0
-	    fi
-	fi
+    sleep 10
+    numprocs=$(ps --no-headers -q ${pidlist} | wc -l)
+    if [[ ${numprocs} -eq 0 ]]
+    then
+        tmess "All run scripts completed"
+    else
+        # Show we are alive every 30 x 10 = 300s
+        tcheck=$(( tcheck + 1 ))
+        if [[ ${tcheck} -eq 30 ]]
+        then
+            tmess "${numprocs} run scripts still running" "..."
+            tcheck=0
+        fi
+    fi
     done
 
     # Append all the benchmark logs
     hdr "Appending benchmark run logs" "..."
     for bmlog in ${loglist}
     do
-	loghdr "Run log for $(basename ${bmlog} | sed -e 's/.log$//')"
-	cat ${bmlog} >> ${logfile}
+    loghdr "Run log for $(basename ${bmlog} | sed -e 's/.log$//')"
+    cat ${bmlog} >> ${logfile}
     done
 
     # Finally check for correctness.  We do this in benchmark order for clarity
@@ -657,27 +674,31 @@ then
     numbad=0
     for bm in ${goodbuilds}
     do
-	bmfails=0
-	for script in ${scriptdir}/${bm}-check-*.sh
-	do
-	    chmod ugo+x ${script}
-	    if ! ${script} >> ${logfile} 2>&1
-	    then
-		logmess "${script} failed check"
-		bmfails=$(( bmfails + 1 ))
-	    fi
-	done
-	if [[ ${bmfails} -eq 0 ]]
-	then
-	    numgood=$(( numgood + 1 ))
-	else
-	    numbad=$(( numbad + 1 ))
-	    mess "${bm} failed ${bmfails} checks"
-	fi
+    bmfails=0
+    for script in ${scriptdir}/${bm}-check-*.sh
+    do
+        chmod ugo+x ${script}
+        if ! ${script} >> ${logfile} 2>&1
+        then
+            logmess "${script} failed check"
+            bmfails=$(( bmfails + 1 ))
+        fi
+    done
+    if [[ ${bmfails} -eq 0 ]]
+    then
+        numgood=$(( numgood + 1 ))
+    else
+        numbad=$(( numbad + 1 ))
+        mess "${bm} failed ${bmfails} checks"
+    fi
     done
 fi
 
-mess "${numgoodbuilds} benchmarks built correctly, ${numbadbuilds} failed"
+if [[ "${dobuild}" == "yes" ]]
+then
+    mess "${numgoodbuilds} benchmarks built correctly, ${numbadbuilds} failed"
+fi
+
 if [[ "x${dorun}" == "xyes" ]]
 then
     mess "${numgood} benchmark runs passed, ${numbad} failed"
@@ -687,12 +708,17 @@ if [[ "${doclean}" == "yes" ]]
 then
     logmess "SPEC CPU cleaning log in ${cleanlog}"
 fi
-logmess "SPEC CPU build log in ${buildlog}"
+
+if [[ "${dobuild}" == "yes" ]]
+then
+    logmess "SPEC CPU build log in ${buildlog}"
+fi
+
 if [[ "x${dorun}" == "xyes" ]]
 then
     for run in ${!runlog[@]}
     do
-	logmess "SPEC CPU run log for ${run} in ${runlog[${run}]}"
+        logmess "SPEC CPU run log for ${run} in ${runlog[${run}]}"
     done
 fi
 

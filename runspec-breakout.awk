@@ -48,11 +48,12 @@ verifying && /# Starting run for copy/ {
     print $0 > scriptfile
 }
 
-invoking && /^qemu-riscv64/ {
+verifying && /^qemu-riscv64 .* -- [^[:space:]]+\/specperl/ {
+    gsub("^qemu-riscv64 .*-- ", "", $0)
     print $0 > scriptfile
 }
 
-verifying && /^[^[:space:]]+\/specperl/ {
+(invoking || verifying) && /^qemu-riscv64/ {
     print $0 > scriptfile
 }
 
